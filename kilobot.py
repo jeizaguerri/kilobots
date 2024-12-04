@@ -2,8 +2,8 @@ from math import sin, cos, pi, inf
 from enum import Enum
 import pygame
 
-KILOBOT_FORWARD_SPEED = 20
-KILOBOT_ROTATION_SPEED = 5
+KILOBOT_FORWARD_SPEED = 15
+KILOBOT_ROTATION_SPEED = 7
 KILOBOT_RADIUS = 10
 DESIRED_DISTANCE = 23
 BROADCAST_RADIUS = 50
@@ -37,6 +37,8 @@ class Kilobot:
         self.timer = 0
         self.updates_gradient = True
         self.activation_index = inf
+        self.going_down_gradient = False
+        self.prev_gradient = 0
     
     def __str__(self):
         return f"KiloBot {self.id} at {self.pos} facing {self.direction}"
@@ -96,12 +98,24 @@ class Kilobot:
             self.gradient = 0
             return
 
-        if not self.updates_gradient:
-            return
+        # if not self.updates_gradient:
+        #     return
         
         neighbours_within_gradient_distance = [neighbour for neighbour in self.neighbours if neighbour["distance"] < GRADIENT_DISTANCE]
+        if self.state == KilobotState.JOINED_SHAPE:
+            joined_neighbours_within_gradient_distance = [neighbour for neighbour in neighbours_within_gradient_distance if neighbour["state"] == KilobotState.JOINED_SHAPE]
+            if len(joined_neighbours_within_gradient_distance) > 0:
+                min_gradient = min([neighbour["gradient"] for neighbour in joined_neighbours_within_gradient_distance])
+                self.gradient = min_gradient + 1
+                gradient_changed = self.gradient != self.prev_gradient
+                if gradient_changed:
+                    self.going_down_gradient = self.gradient < self.prev_gradient
+                    self.prev_gradient = self.gradient
+            return
+        
         if len(neighbours_within_gradient_distance) == 0:
             self.gradient = inf
+            self.prev_gradient = self.gradient
             return
         
         min_gradient = min([neighbour["gradient"] for neighbour in neighbours_within_gradient_distance])
@@ -163,7 +177,7 @@ class Kilobot:
                 self.state = KilobotState.JOINED_SHAPE
             closes_neighbour_distance = min([neighbour["distance"] for neighbour in self.neighbours])
             closest_neighbour = [neighbour for neighbour in self.neighbours if neighbour["distance"] == closes_neighbour_distance][0]
-            if self.gradient <= closest_neighbour["gradient"]:
+            if self.gradient == closest_neighbour["gradient"] and not self.going_down_gradient:
                 self.state = KilobotState.JOINED_SHAPE
                 
             moving_prior_neighbours = [neighbour for neighbour in self.neighbours if neighbour["state"] in [KilobotState.MOVE_WHILE_INSIDE, KilobotState.MOVE_WHILE_OUTSIDE] and neighbour["activation_index"] < self.activation_index]

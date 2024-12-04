@@ -4,7 +4,6 @@ from math import sin, cos, pi
 from kilobot import Kilobot, KILOBOT_RADIUS, draw_bots, update_bots, KilobotState, generate_kilobot_grid
 
 BACKGROUND_TILE_SIZE = 32
-TIME_SCALE = 1
 
 def main():
     display_desired_shape = True
@@ -29,7 +28,7 @@ def main():
     bots.extend(edge_bots)
     
     # Load shape image
-    shape = pygame.image.load("donut.png")
+    shape = pygame.image.load("shapes/donut.png")
     shape.set_colorkey ((255, 255, 255))
     shape.set_alpha(77)
     
@@ -56,7 +55,7 @@ def main():
                 
         
         # Update bots
-        dt = (clock.get_time() / 1000) * TIME_SCALE
+        dt = (clock.get_time() / 1000)
         update_bots(bots, dt, shape_array)
 
         # fill the screen with a color to wipe away anything from last frame
