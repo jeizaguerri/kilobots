@@ -6,7 +6,7 @@ KILOBOT_FORWARD_SPEED = 15
 KILOBOT_ROTATION_SPEED = 7
 KILOBOT_RADIUS = 10
 DESIRED_DISTANCE = 23
-BROADCAST_RADIUS = 50
+BROADCAST_RADIUS = 100
 GRADIENT_DISTANCE = 30
 STARTUP_TIME = 2
 YIELD_DISTANCE = 35
@@ -37,8 +37,10 @@ class Kilobot:
         self.timer = 0
         self.updates_gradient = True
         self.activation_index = inf
-        self.going_down_gradient = False
-        self.prev_gradient = 0
+        # self.going_down_gradient = False
+        # self.prev_gradient = 0
+        self.percieved_pos = (0, 0) if not is_seed else pos
+        self.selected_bot = False
     
     def __str__(self):
         return f"KiloBot {self.id} at {self.pos} facing {self.direction}"
@@ -47,7 +49,7 @@ class Kilobot:
         movement_x = KILOBOT_FORWARD_SPEED * cos(self.rotation) * dt
         movement_y = KILOBOT_FORWARD_SPEED * sin(self.rotation) * dt
         self.pos = (self.pos[0] + movement_x, self.pos[1] + movement_y)
-        
+
         
     def rotateLeft(self, dt):
         self.rotation -= KILOBOT_ROTATION_SPEED * dt
@@ -86,11 +88,11 @@ class Kilobot:
             if other.id == self.id:
                 continue
             
-            distance = ((self.pos[0] - other.pos[0])**2 + (self.pos[1] - other.pos[1])**2)**0.5
+            distance = self._real_distance_to(other.pos)
             if distance > BROADCAST_RADIUS:
                 continue
             
-            other.neighbours.append({"id": self.id, "distance": distance, "gradient": self.gradient, "state": self.state, "activation_index": self.activation_index})
+            other.neighbours.append({"id": self.id, "distance": distance, "gradient": self.gradient, "state": self.state, "activation_index": self.activation_index, "pos": self.percieved_pos})
     
     
     def form_gradient(self):
@@ -98,20 +100,20 @@ class Kilobot:
             self.gradient = 0
             return
 
-        # if not self.updates_gradient:
-        #     return
+        if not self.updates_gradient:
+            return
         
         neighbours_within_gradient_distance = [neighbour for neighbour in self.neighbours if neighbour["distance"] < GRADIENT_DISTANCE]
-        if self.state == KilobotState.JOINED_SHAPE:
-            joined_neighbours_within_gradient_distance = [neighbour for neighbour in neighbours_within_gradient_distance if neighbour["state"] == KilobotState.JOINED_SHAPE]
-            if len(joined_neighbours_within_gradient_distance) > 0:
-                min_gradient = min([neighbour["gradient"] for neighbour in joined_neighbours_within_gradient_distance])
-                self.gradient = min_gradient + 1
-                gradient_changed = self.gradient != self.prev_gradient
-                if gradient_changed:
-                    self.going_down_gradient = self.gradient < self.prev_gradient
-                    self.prev_gradient = self.gradient
-            return
+        # if self.state == KilobotState.JOINED_SHAPE:
+        #     joined_neighbours_within_gradient_distance = [neighbour for neighbour in neighbours_within_gradient_distance if neighbour["state"] == KilobotState.JOINED_SHAPE]
+        #     if len(joined_neighbours_within_gradient_distance) > 0:
+        #         min_gradient = min([neighbour["gradient"] for neighbour in joined_neighbours_within_gradient_distance])
+        #         self.gradient = min_gradient + 1
+        #         gradient_changed = self.gradient != self.prev_gradient
+        #         if gradient_changed:
+        #             self.going_down_gradient = self.gradient < self.prev_gradient
+        #             self.prev_gradient = self.gradient
+        #     return
         
         if len(neighbours_within_gradient_distance) == 0:
             self.gradient = inf
@@ -122,6 +124,21 @@ class Kilobot:
         self.gradient = min_gradient + 1
 
 
+    def localise(self):
+        if self.state == KilobotState.JOINED_SHAPE:
+            return
+        
+        localised_stationary_neighbours = [neighbour for neighbour in self.neighbours if neighbour["state"] in [KilobotState.JOINED_SHAPE]]
+        if len(localised_stationary_neighbours) < 3:
+            return
+
+        for neighbour in localised_stationary_neighbours:
+            c = self._percieved_distance_to(neighbour["pos"])
+            v = (self.percieved_pos[0] - neighbour["pos"][0], self.percieved_pos[1] - neighbour["pos"][1])
+            v = (v[0] / c, v[1] / c)
+            n = (neighbour["pos"][0] + neighbour["distance"] * v[0], neighbour["pos"][1] + neighbour["distance"] * v[1])
+            self.percieved_pos = (self.percieved_pos[0] - (self.percieved_pos[0] - n[0]), self.percieved_pos[1] - (self.percieved_pos[1] - n[1]))
+                
     
     def self_assembly(self, dt, shape):
         if self.state == KilobotState.START:
@@ -159,7 +176,7 @@ class Kilobot:
                 self.activation_index = Kilobot.activation_index
                 Kilobot.activation_index += 1
                 
-            if position_inside_shape(self.pos, shape):
+            if position_inside_shape(self.percieved_pos, shape):
                 self.state = KilobotState.MOVE_WHILE_INSIDE
                 return
             
@@ -173,11 +190,11 @@ class Kilobot:
             return
 
         if self.state == KilobotState.MOVE_WHILE_INSIDE:
-            if not position_inside_shape(self.pos, shape):
+            if not position_inside_shape(self.percieved_pos, shape):
                 self.state = KilobotState.JOINED_SHAPE
             closes_neighbour_distance = min([neighbour["distance"] for neighbour in self.neighbours])
             closest_neighbour = [neighbour for neighbour in self.neighbours if neighbour["distance"] == closes_neighbour_distance][0]
-            if self.gradient == closest_neighbour["gradient"] and not self.going_down_gradient:
+            if self.gradient == closest_neighbour["gradient"]: #and not self.going_down_gradient:
                 self.state = KilobotState.JOINED_SHAPE
                 
             moving_prior_neighbours = [neighbour for neighbour in self.neighbours if neighbour["state"] in [KilobotState.MOVE_WHILE_INSIDE, KilobotState.MOVE_WHILE_OUTSIDE] and neighbour["activation_index"] < self.activation_index]
@@ -203,9 +220,29 @@ class Kilobot:
     def update_color(self):        
         color = self.colors_dict[self.state]
         self.color = color
+        if self.is_seed:
+            self.color = "#00848f"
+    
+    def draw_additional_info(self, screen):
+        # Show percieved position
+        pygame.draw.circle(screen, "blue", self.percieved_pos, 5)
+        
+        #Outline self
+        pygame.draw.circle(screen, "black", self.pos, KILOBOT_RADIUS, 2)
+        
+        # Outline neighbours
+        for neighbour in self.neighbours:
+            pygame.draw.circle(screen, "green", neighbour["pos"], KILOBOT_RADIUS, 1)
+            
                 
     def _fix_rotation(self):
         self.rotation %= 2 * pi
+    
+    def _real_distance_to(self, pos):
+        return ((self.pos[0] - pos[0])**2 + (self.pos[1] - pos[1])**2)**0.5
+    
+    def _percieved_distance_to(self, pos):
+        return ((self.percieved_pos[0] - pos[0])**2 + (self.percieved_pos[1] - pos[1])**2)**0.5
     
 
 
@@ -220,6 +257,10 @@ def draw_bots(screen, bots, draw_gradient=True):
             text = font.render(str(bot.gradient), True, "white")
             text_pos = (bot.pos[0] + 1 - text.get_width() / 2, bot.pos[1] + 1 - text.get_height() / 2)
             screen.blit(text, text_pos)
+
+    for bot in bots:
+        if bot.selected_bot:
+            bot.draw_additional_info(screen)
     
 def update_neighbours(bots):
     for bot in bots:
@@ -233,6 +274,7 @@ def update_bots(bots, dt, shape):
     
     for bot in bots:
         bot.form_gradient()
+        bot.localise()
         bot.self_assembly(dt, shape)
         bot.update_color()
 
@@ -252,4 +294,9 @@ def generate_kilobot_grid(rows, cols, start_pos):
             y = start_pos[1] + i * 2.5 * KILOBOT_RADIUS
             bots.append(Kilobot((x, y), pi))
     
+    return bots
+
+def remove_bots_not_forming_shape(bots):
+    bots_in_shape = [bot for bot in bots if bot.state == KilobotState.JOINED_SHAPE]
+    bots = bots_in_shape
     return bots

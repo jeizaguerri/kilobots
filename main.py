@@ -1,34 +1,42 @@
 import pygame
 from math import sin, cos, pi
 
-from kilobot import Kilobot, KILOBOT_RADIUS, draw_bots, update_bots, KilobotState, generate_kilobot_grid
+from kilobot import Kilobot, KILOBOT_RADIUS, draw_bots, update_bots, KilobotState, generate_kilobot_grid, remove_bots_not_forming_shape
 
 BACKGROUND_TILE_SIZE = 32
+
 
 def main():
     display_desired_shape = True
     display_grid = True
     display_gradient = True
     display_bots = True
+    enable_update = True
     
     # pygame setup
     pygame.init()
     screen = pygame.display.set_mode((1280, 720))
     clock = pygame.time.Clock()
     running = True
+    font = pygame.font.SysFont(None, 24)
+    timer = 0
     
     # Create bots
     bots = []
     seed_bots = [
-        Kilobot((768, 314), pi, is_seed=True),
+        Kilobot((768, 224), pi, is_seed=True),
+        Kilobot((768, 249), pi, is_seed=True),
+        Kilobot((788, 237), pi, is_seed=True),
+        Kilobot((748, 237), pi, is_seed=True),
+        
     ]
     bots.extend(seed_bots)
     
-    edge_bots = generate_kilobot_grid(10, 20, (768, 341))
+    edge_bots = generate_kilobot_grid(10, 20, (778, 271))
     bots.extend(edge_bots)
     
     # Load shape image
-    shape = pygame.image.load("shapes/donut.png")
+    shape = pygame.image.load("shapes/arrow.png")
     shape.set_colorkey ((255, 255, 255))
     shape.set_alpha(77)
     
@@ -52,26 +60,58 @@ def main():
                     display_gradient = not display_gradient
                 if event.key == pygame.K_4:
                     display_bots = not display_bots
-                
+                if event.key == pygame.K_SPACE:
+                    enable_update = not enable_update
+                if event.key == pygame.K_ESCAPE:
+                    bots = remove_bots_not_forming_shape(bots)
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if event.button == 1:
+                    for bot in bots:
+                        if bot._real_distance_to(event.pos) < KILOBOT_RADIUS:
+                            bot.selected_bot = not bot.selected_bot
+
         
         # Update bots
         dt = (clock.get_time() / 1000)
-        update_bots(bots, dt, shape_array)
+        
+        if enable_update:
+            timer += dt
+            update_bots(bots, dt, shape_array)
 
-        # fill the screen with a color to wipe away anything from last frame
-        # Gray tiles of size 10x10, black outline
+
+        # RENDER YOUR GAME HERE
         for x in range(0, 1280, BACKGROUND_TILE_SIZE):
             for y in range(0, 720, BACKGROUND_TILE_SIZE):
                 pygame.draw.rect(screen, "#f1faee", (x, y, BACKGROUND_TILE_SIZE, BACKGROUND_TILE_SIZE), 0)
                 if display_grid:
                     pygame.draw.rect(screen, (230,230,230), (x, y, BACKGROUND_TILE_SIZE, BACKGROUND_TILE_SIZE), 1)
-
-        # RENDER YOUR GAME HERE
+                    
         if display_desired_shape:
             screen.blit(shape, (640 - shape.get_width()//2, 360 - shape.get_height()//2))
         
         if display_bots:
             draw_bots(screen, bots, display_gradient)
+        
+        # Show controls and info in bottom left
+        texts = [
+            "Controls: ",
+            f"[1]: Display desired shape: {display_desired_shape}",
+            f"[2]: Display grid: {display_grid}",
+            f"[3]: Display gradient: {display_gradient}",
+            f"[4]: Display bots: {display_bots}",
+            f"[SPACE]: Enable update: {enable_update}",
+            "[ESC]: Remove all bots not forming shape",
+            f"Click on a bot for more info",
+            "",
+            f"Elapsed time: {timer:.2f} seconds",
+            f"Total bots: {len(bots)} (Forming shape: {len([bot for bot in bots if bot.state == KilobotState.JOINED_SHAPE])})"
+        ]
+        distance_between_lines = 20
+        for i in range(len(texts)):
+            line_i = len(texts) - i - 1
+            text = font.render(texts[i], True, (0, 0, 0))
+            screen.blit(text, (10, 720 - (line_i + 1) * distance_between_lines))
+        
 
         # flip() the display to put your work on screen
         pygame.display.flip()
