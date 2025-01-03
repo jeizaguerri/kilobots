@@ -1,17 +1,37 @@
 import pygame
+import matplotlib.pyplot as plt
+import json
 from math import sin, cos, pi
-
-from kilobot import Kilobot, KILOBOT_RADIUS, draw_bots, update_bots, KilobotState, generate_kilobot_grid, remove_bots_not_forming_shape
+from kilobot import Kilobot, KILOBOT_RADIUS, draw_bots, update_bots, KilobotState, generate_kilobot_grid, remove_bots_not_forming_shape, average_location_error
 
 BACKGROUND_TILE_SIZE = 32
+MS_PER_UPDATE = 100
+TEST_NAME = "test2"
+OUTPUT_FILE = f"info/average_errors.json"
 
-
+def save_graph_info_json(location_errors, test_name):
+    # Open OUTPUT_FILE and read the content as json. If an obtect of name test_name exists, replace it with the new data
+    # Create file if it doesnt exist
+    try:
+        with open(OUTPUT_FILE, "r") as f:
+            data = json.load(f)
+            data[test_name] = location_errors
+    except:
+        data = {test_name: location_errors}
+        
+    # Write the new data to the file
+    with open(OUTPUT_FILE, "w") as f:
+        json.dump(data, f)
+    
+        
 def main():
     display_desired_shape = True
     display_grid = True
     display_gradient = True
     display_bots = True
     enable_update = True
+    location_errors = []
+    last_forming_shape_bots = 0
     
     # pygame setup
     pygame.init()
@@ -28,7 +48,6 @@ def main():
         Kilobot((768, 249), pi, is_seed=True),
         Kilobot((788, 237), pi, is_seed=True),
         Kilobot((748, 237), pi, is_seed=True),
-        
     ]
     bots.extend(seed_bots)
     
@@ -43,7 +62,14 @@ def main():
     # Convert to array
     shape_array = pygame.surfarray.array3d(shape)
     
-    
+    # Create average location error graph
+    plt.ion()
+    plt.figure()
+    plt.title("Average location error")
+    plt.xlabel("Bots forming shape")
+    plt.ylabel("Average location error (px)")
+    plt.grid()
+    plt.show()
 
     while running:
         # poll for events
@@ -64,6 +90,8 @@ def main():
                     enable_update = not enable_update
                 if event.key == pygame.K_ESCAPE:
                     bots = remove_bots_not_forming_shape(bots)
+                if event.key == pygame.K_s:
+                    save_graph_info_json(location_errors, TEST_NAME)
             if event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 1:
                     for bot in bots:
@@ -72,12 +100,24 @@ def main():
 
         
         # Update bots
-        dt = (clock.get_time() / 1000)
+        # dt = (clock.get_time() / 1000)
+        dt = MS_PER_UPDATE / 1000
         
         if enable_update:
             timer += dt
             update_bots(bots, dt, shape_array)
 
+        # Check robots forming shape
+        forming_shape_bots = [bot for bot in bots if bot.state == KilobotState.JOINED_SHAPE]
+        number_of_forming_shape_bots = len(forming_shape_bots)
+        if number_of_forming_shape_bots != last_forming_shape_bots:
+            location_errors.append(average_location_error(forming_shape_bots))
+            last_forming_shape_bots = number_of_forming_shape_bots
+            # Update graph
+            plt.plot(location_errors, 'b')
+            plt.draw()
+            plt.pause(0.001)
+            
 
         # RENDER YOUR GAME HERE
         for x in range(0, 1280, BACKGROUND_TILE_SIZE):
@@ -92,6 +132,7 @@ def main():
         if display_bots:
             draw_bots(screen, bots, display_gradient)
         
+        
         # Show controls and info in bottom left
         texts = [
             "Controls: ",
@@ -101,10 +142,12 @@ def main():
             f"[4]: Display bots: {display_bots}",
             f"[SPACE]: Enable update: {enable_update}",
             "[ESC]: Remove all bots not forming shape",
+            "[S]: Save graph info to file",
             f"Click on a bot for more info",
             "",
-            f"Elapsed time: {timer:.2f} seconds",
-            f"Total bots: {len(bots)} (Forming shape: {len([bot for bot in bots if bot.state == KilobotState.JOINED_SHAPE])})"
+            f"Simulation time: {timer:.2f} seconds",
+            f"FPS: {int(clock.get_fps())}",
+            f"Total bots: {len(bots)} (Forming shape: {number_of_forming_shape_bots})"
         ]
         distance_between_lines = 20
         for i in range(len(texts)):

@@ -1,9 +1,15 @@
 from math import sin, cos, pi, inf
+from random import random, normalvariate
 from enum import Enum
 import pygame
 
-KILOBOT_FORWARD_SPEED = 15
-KILOBOT_ROTATION_SPEED = 7
+KILOBOT_FORWARD_SPEED_MEAN = 10
+KILOBOT_FORWARD_SPEED_STD = 1
+KILOBOT_FORWARD_SPEED_ERROR = 0.05
+KILOBOT_ROTATION_SPEED_MEAN = 5
+KILOBOT_ROTATION_SPEED_STD = 1
+KILOBOT_ROTATION_SPEED_ERROR = 0.05
+
 KILOBOT_RADIUS = 10
 DESIRED_DISTANCE = 23
 BROADCAST_RADIUS = 100
@@ -37,26 +43,41 @@ class Kilobot:
         self.timer = 0
         self.updates_gradient = True
         self.activation_index = inf
-        # self.going_down_gradient = False
-        # self.prev_gradient = 0
         self.percieved_pos = (0, 0) if not is_seed else pos
         self.selected_bot = False
+        self.forwad_speed = normalvariate(KILOBOT_FORWARD_SPEED_MEAN, KILOBOT_FORWARD_SPEED_STD)
+        self.rotation_speed = normalvariate(KILOBOT_ROTATION_SPEED_MEAN, KILOBOT_ROTATION_SPEED_STD)
     
     def __str__(self):
         return f"KiloBot {self.id} at {self.pos} facing {self.direction}"
     
     def moveStraight(self, dt):
-        movement_x = KILOBOT_FORWARD_SPEED * cos(self.rotation) * dt
-        movement_y = KILOBOT_FORWARD_SPEED * sin(self.rotation) * dt
-        self.pos = (self.pos[0] + movement_x, self.pos[1] + movement_y)
+        movement_x = self.forwad_speed * cos(self.rotation) * dt
+        movement_y = self.forwad_speed * sin(self.rotation) * dt
+        error = random() * KILOBOT_FORWARD_SPEED_ERROR * 2 - KILOBOT_FORWARD_SPEED_ERROR
+        error_x = error * movement_x
+        error_y = error * movement_y
+        new_position = (self.pos[0] + movement_x + error_x, self.pos[1] + movement_y + error_y)
+        
+        self.pos = new_position
 
         
     def rotateLeft(self, dt):
-        self.rotation -= KILOBOT_ROTATION_SPEED * dt
+        rotation = self.rotation_speed * dt
+        error = random() * KILOBOT_ROTATION_SPEED_ERROR * 2 - KILOBOT_ROTATION_SPEED_ERROR
+        rotation_error = error * rotation
+        new_rotation = self.rotation - rotation + rotation_error
+        
+        self.rotation = new_rotation
         self._fix_rotation()
     
     def rotateRight(self, dt):
-        self.rotation += KILOBOT_ROTATION_SPEED * dt
+        rotation = self.rotation_speed * dt
+        error = random() * KILOBOT_ROTATION_SPEED_ERROR * 2 - KILOBOT_ROTATION_SPEED_ERROR
+        rotation_error = error * rotation
+        new_rotation = self.rotation + rotation + rotation_error
+        
+        self.rotation = new_rotation
         self._fix_rotation()
         
     def follow_edge(self, dt):
@@ -104,6 +125,7 @@ class Kilobot:
             return
         
         neighbours_within_gradient_distance = [neighbour for neighbour in self.neighbours if neighbour["distance"] < GRADIENT_DISTANCE]
+        stationary_neighbours = [neighbour for neighbour in neighbours_within_gradient_distance if neighbour["state"] in (KilobotState.JOINED_SHAPE, KilobotState.WAIT_TO_MOVE)]
         # if self.state == KilobotState.JOINED_SHAPE:
         #     joined_neighbours_within_gradient_distance = [neighbour for neighbour in neighbours_within_gradient_distance if neighbour["state"] == KilobotState.JOINED_SHAPE]
         #     if len(joined_neighbours_within_gradient_distance) > 0:
@@ -115,12 +137,12 @@ class Kilobot:
         #             self.prev_gradient = self.gradient
         #     return
         
-        if len(neighbours_within_gradient_distance) == 0:
+        if len(stationary_neighbours) == 0:
             self.gradient = inf
             self.prev_gradient = self.gradient
             return
         
-        min_gradient = min([neighbour["gradient"] for neighbour in neighbours_within_gradient_distance])
+        min_gradient = min([neighbour["gradient"] for neighbour in stationary_neighbours])
         self.gradient = min_gradient + 1
 
 
@@ -210,6 +232,7 @@ class Kilobot:
             self.updates_gradient = False
             return
 
+
     colors_dict = {
             KilobotState.START: "#A8DADC",
             KilobotState.WAIT_TO_MOVE: "#e63946",
@@ -223,6 +246,7 @@ class Kilobot:
         if self.is_seed:
             self.color = "#00848f"
     
+    
     def draw_additional_info(self, screen):
         # Show percieved position
         pygame.draw.circle(screen, "blue", self.percieved_pos, 5)
@@ -233,7 +257,11 @@ class Kilobot:
         # Outline neighbours
         for neighbour in self.neighbours:
             pygame.draw.circle(screen, "green", neighbour["pos"], KILOBOT_RADIUS, 1)
-            
+    
+    
+    def location_error(self):
+        return self._real_distance_to(self.percieved_pos)
+    
                 
     def _fix_rotation(self):
         self.rotation %= 2 * pi
@@ -292,7 +320,8 @@ def generate_kilobot_grid(rows, cols, start_pos):
         for j in range(cols):
             x = start_pos[0] - j * 2.5 * KILOBOT_RADIUS + offset
             y = start_pos[1] + i * 2.5 * KILOBOT_RADIUS
-            bots.append(Kilobot((x, y), pi))
+            rotation =  random() * 2 * pi
+            bots.append(Kilobot((x, y), rotation))
     
     return bots
 
@@ -300,3 +329,8 @@ def remove_bots_not_forming_shape(bots):
     bots_in_shape = [bot for bot in bots if bot.state == KilobotState.JOINED_SHAPE]
     bots = bots_in_shape
     return bots
+
+
+def average_location_error(bots):
+    location_errors = [bot.location_error() for bot in bots]
+    return sum(location_errors) / len(location_errors)
