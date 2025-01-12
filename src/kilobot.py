@@ -22,7 +22,7 @@ YIELD_DISTANCE = 35
 DISABLE_MOVEMENT_ERROR = False
 DISABLE_DISTANCE_ERROR = False
 
-LOCALISE_TIME_AFTER_JOINING = 0
+LOCALISE_TIME_AFTER_JOINING = 1
 
 class KilobotState(Enum):
     START = 0
@@ -247,13 +247,11 @@ class Kilobot:
         if self.state == KilobotState.MOVE_WHILE_INSIDE:
             if not position_inside_shape(self.percieved_pos, shape):
                 self.state = KilobotState.JOINED_SHAPE
-                self.use_localise = False
                 self.joined_shape_time = 0
             closes_neighbour_distance = min([neighbour["distance"] for neighbour in self.neighbours])
             closest_neighbour = [neighbour for neighbour in self.neighbours if neighbour["distance"] == closes_neighbour_distance][0]
             if self.gradient == closest_neighbour["gradient"]: #and not self.going_down_gradient:
                 self.state = KilobotState.JOINED_SHAPE
-                self.use_localise = False
                 self.joined_shape_time = 0
                 
             moving_prior_neighbours = [neighbour for neighbour in self.neighbours if neighbour["state"] in [KilobotState.MOVE_WHILE_INSIDE, KilobotState.MOVE_WHILE_OUTSIDE] and neighbour["activation_index"] < self.activation_index]
