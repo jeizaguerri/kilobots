@@ -1,28 +1,33 @@
 import pygame
+import os
 import matplotlib.pyplot as plt
 import json
 from math import sin, cos, pi
-from kilobot import Kilobot, KILOBOT_RADIUS, draw_bots, update_bots, KilobotState, generate_kilobot_grid, remove_bots_not_forming_shape, average_location_error
+from kilobot import Kilobot, KILOBOT_RADIUS, draw_bots, update_bots, KilobotState, generate_kilobots, remove_bots_not_forming_shape, average_location_error
 
 BACKGROUND_TILE_SIZE = 32
 MS_PER_UPDATE = 100
-TEST_NAME = "test2"
-OUTPUT_FILE = f"info/average_errors.json"
+TEST_NAME = "arrow_bad"
+OUTPUT_FILE = f"info/output_info.json"
+IMAGE_FILE = "shapes/arrow.png"
 
-def save_graph_info_json(location_errors, test_name):
-    # Open OUTPUT_FILE and read the content as json. If an obtect of name test_name exists, replace it with the new data
-    # Create file if it doesnt exist
-    try:
+def save_graph_info_json(location_errors, timer, forming_shape_bots, average_error, test_name):
+    if os.path.exists(OUTPUT_FILE):
+        # Open OUTPUT_FILE and read the content as json
         with open(OUTPUT_FILE, "r") as f:
-            data = json.load(f)
-            data[test_name] = location_errors
-    except:
-        data = {test_name: location_errors}
-        
-    # Write the new data to the file
+            try:
+                data = json.load(f)
+            except json.JSONDecodeError:
+                data = {}
+    else:
+        data = {}
+
+    # Update the data with the new test information
+    data[test_name] = {"errors": location_errors, "time": timer, "bots": forming_shape_bots, "average_error": average_error}
+
+    # Write the updated data back to the file
     with open(OUTPUT_FILE, "w") as f:
-        json.dump(data, f)
-    
+        json.dump(data, f, indent=4)
         
 def main():
     display_desired_shape = True
@@ -31,7 +36,9 @@ def main():
     display_bots = True
     enable_update = True
     location_errors = []
-    last_forming_shape_bots = 0
+    number_of_last_forming_shape_bots = 0
+    last_forming_shape_bots = []
+    enable_trilateration = True
     
     # pygame setup
     pygame.init()
@@ -40,34 +47,35 @@ def main():
     running = True
     font = pygame.font.SysFont(None, 24)
     timer = 0
-    
-    # Create bots
-    bots = []
-    seed_bots = [
-        Kilobot((768, 224), pi, is_seed=True),
-        Kilobot((768, 249), pi, is_seed=True),
-        Kilobot((788, 237), pi, is_seed=True),
-        Kilobot((748, 237), pi, is_seed=True),
-    ]
-    bots.extend(seed_bots)
-    
-    edge_bots = generate_kilobot_grid(10, 20, (778, 271))
-    bots.extend(edge_bots)
+    last_robot_join_time = 0
     
     # Load shape image
-    shape = pygame.image.load("shapes/arrow.png")
+    shape = pygame.image.load(IMAGE_FILE)
     shape.set_colorkey ((255, 255, 255))
     shape.set_alpha(77)
+    
+    # Find red pixel
+    shape_origin = None
+    for x in range(shape.get_width()):
+        for y in range(shape.get_height()):
+            if shape.get_at((x, y)) == (255, 0, 0, 255):
+                shape_origin = (x, y)
+    
+    # Generate bots
+    if not shape_origin:
+        print("Shape origin not found")
+        return
+    bots = generate_kilobots(shape_origin, 10, 20)
     
     # Convert to array
     shape_array = pygame.surfarray.array3d(shape)
     
-    # Create average location error graph
+    # Create error graph
     plt.ion()
     plt.figure()
-    plt.title("Average location error")
+    plt.title("Location error")
     plt.xlabel("Bots forming shape")
-    plt.ylabel("Average location error (px)")
+    plt.ylabel("Location error (px)")
     plt.grid()
     plt.show()
 
@@ -91,7 +99,10 @@ def main():
                 if event.key == pygame.K_ESCAPE:
                     bots = remove_bots_not_forming_shape(bots)
                 if event.key == pygame.K_s:
-                    save_graph_info_json(location_errors, TEST_NAME)
+                    avg_error = average_location_error(forming_shape_bots)
+                    save_graph_info_json(location_errors, last_robot_join_time, number_of_last_forming_shape_bots, avg_error, TEST_NAME)
+                if event.key == pygame.K_t:
+                    enable_trilateration = not enable_trilateration
             if event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 1:
                     for bot in bots:
@@ -105,21 +116,26 @@ def main():
         
         if enable_update:
             timer += dt
-            update_bots(bots, dt, shape_array)
+            update_bots(bots, dt, shape_array, enable_trilateration=enable_trilateration)
 
         # Check robots forming shape
         forming_shape_bots = [bot for bot in bots if bot.state == KilobotState.JOINED_SHAPE]
         number_of_forming_shape_bots = len(forming_shape_bots)
-        if number_of_forming_shape_bots != last_forming_shape_bots:
-            location_errors.append(average_location_error(forming_shape_bots))
-            last_forming_shape_bots = number_of_forming_shape_bots
+        if number_of_forming_shape_bots != number_of_last_forming_shape_bots:
+            # Find new bot
+            new_bot = [bot for bot in forming_shape_bots if bot not in last_forming_shape_bots][0]
+            
+            location_errors.append(new_bot.location_error())
+            number_of_last_forming_shape_bots = number_of_forming_shape_bots
+            last_forming_shape_bots = forming_shape_bots
             # Update graph
             plt.plot(location_errors, 'b')
             plt.draw()
             plt.pause(0.001)
+            last_robot_join_time = timer
             
 
-        # RENDER YOUR GAME HERE
+        # Render game
         for x in range(0, 1280, BACKGROUND_TILE_SIZE):
             for y in range(0, 720, BACKGROUND_TILE_SIZE):
                 pygame.draw.rect(screen, "#f1faee", (x, y, BACKGROUND_TILE_SIZE, BACKGROUND_TILE_SIZE), 0)
@@ -143,6 +159,7 @@ def main():
             f"[SPACE]: Enable update: {enable_update}",
             "[ESC]: Remove all bots not forming shape",
             "[S]: Save graph info to file",
+            f"[T]: Toggle trilateration: {enable_trilateration}",
             f"Click on a bot for more info",
             "",
             f"Simulation time: {timer:.2f} seconds",

@@ -5,10 +5,12 @@ import pygame
 
 KILOBOT_FORWARD_SPEED_MEAN = 10
 KILOBOT_FORWARD_SPEED_STD = 1
-KILOBOT_FORWARD_SPEED_ERROR = 0.05
-KILOBOT_ROTATION_SPEED_MEAN = 5
-KILOBOT_ROTATION_SPEED_STD = 1
-KILOBOT_ROTATION_SPEED_ERROR = 0.05
+KILOBOT_FORWARD_SPEED_ERROR = 0.01
+KILOBOT_ROTATION_SPEED_MEAN = 3
+KILOBOT_ROTATION_SPEED_STD = 0.5
+KILOBOT_ROTATION_SPEED_ERROR = 0.01
+
+DISTANCE_ERROR = 0.01
 
 KILOBOT_RADIUS = 10
 DESIRED_DISTANCE = 23
@@ -16,6 +18,11 @@ BROADCAST_RADIUS = 100
 GRADIENT_DISTANCE = 30
 STARTUP_TIME = 2
 YIELD_DISTANCE = 35
+
+DISABLE_MOVEMENT_ERROR = False
+DISABLE_DISTANCE_ERROR = False
+
+LOCALISE_TIME_AFTER_JOINING = 0
 
 class KilobotState(Enum):
     START = 0
@@ -45,36 +52,54 @@ class Kilobot:
         self.activation_index = inf
         self.percieved_pos = (0, 0) if not is_seed else pos
         self.selected_bot = False
-        self.forwad_speed = normalvariate(KILOBOT_FORWARD_SPEED_MEAN, KILOBOT_FORWARD_SPEED_STD)
-        self.rotation_speed = normalvariate(KILOBOT_ROTATION_SPEED_MEAN, KILOBOT_ROTATION_SPEED_STD)
-    
+        self.forwad_speed = normalvariate(KILOBOT_FORWARD_SPEED_MEAN, KILOBOT_FORWARD_SPEED_STD) if not DISABLE_MOVEMENT_ERROR else KILOBOT_FORWARD_SPEED_MEAN
+        self.rotation_speed = normalvariate(KILOBOT_ROTATION_SPEED_MEAN, KILOBOT_ROTATION_SPEED_STD) if not DISABLE_MOVEMENT_ERROR else KILOBOT_ROTATION_SPEED_MEAN
+        self.iterations_inside_shape = 0
+        self.use_localise = True
+        self.joined_shape_time = 0
+        
     def __str__(self):
         return f"KiloBot {self.id} at {self.pos} facing {self.direction}"
     
-    def moveStraight(self, dt):
+    def move_straight(self, dt):
         movement_x = self.forwad_speed * cos(self.rotation) * dt
         movement_y = self.forwad_speed * sin(self.rotation) * dt
         error = random() * KILOBOT_FORWARD_SPEED_ERROR * 2 - KILOBOT_FORWARD_SPEED_ERROR
         error_x = error * movement_x
         error_y = error * movement_y
+        if DISABLE_MOVEMENT_ERROR:
+            error_x = 0
+            error_y = 0
+            
         new_position = (self.pos[0] + movement_x + error_x, self.pos[1] + movement_y + error_y)
         
+        # Update position
+        old_pos = self.pos
         self.pos = new_position
+        
+        # Fix position if colliding with other bots
+        for bot in self.neighbours:
+            if self._real_distance_to(bot["object"].pos) < 2 * KILOBOT_RADIUS:
+                self.pos = old_pos
+                break
+        
 
         
-    def rotateLeft(self, dt):
+    def rotate_left(self, dt):
         rotation = self.rotation_speed * dt
         error = random() * KILOBOT_ROTATION_SPEED_ERROR * 2 - KILOBOT_ROTATION_SPEED_ERROR
         rotation_error = error * rotation
+        if DISABLE_MOVEMENT_ERROR: rotation_error = 0
         new_rotation = self.rotation - rotation + rotation_error
         
         self.rotation = new_rotation
         self._fix_rotation()
     
-    def rotateRight(self, dt):
+    def rotate_right(self, dt):
         rotation = self.rotation_speed * dt
         error = random() * KILOBOT_ROTATION_SPEED_ERROR * 2 - KILOBOT_ROTATION_SPEED_ERROR
         rotation_error = error * rotation
+        if DISABLE_MOVEMENT_ERROR: rotation_error = 0
         new_rotation = self.rotation + rotation + rotation_error
         
         self.rotation = new_rotation
@@ -90,16 +115,16 @@ class Kilobot:
                 
         if current < DESIRED_DISTANCE:
             if self.prev_distance < current:
-                self.moveStraight(dt)
+                self.move_straight(dt)
             else:
-                self.moveStraight(dt)
-                self.rotateLeft(dt)
+                self.move_straight(dt)
+                self.rotate_left(dt)
         else:
             if self.prev_distance > current:
-                self.moveStraight(dt)
+                self.move_straight(dt)
             else:
-                self.moveStraight(dt)
-                self.rotateRight(dt)
+                self.move_straight(dt)
+                self.rotate_right(dt)
                 
         self.prev_distance = current
     
@@ -109,11 +134,17 @@ class Kilobot:
             if other.id == self.id:
                 continue
             
+            
             distance = self._real_distance_to(other.pos)
+            error = random() * DISTANCE_ERROR * 2 - DISTANCE_ERROR
+            distance_error = error * distance
+            if DISABLE_DISTANCE_ERROR: distance_error = 0
+            distance += distance_error
+            
             if distance > BROADCAST_RADIUS:
                 continue
             
-            other.neighbours.append({"id": self.id, "distance": distance, "gradient": self.gradient, "state": self.state, "activation_index": self.activation_index, "pos": self.percieved_pos})
+            other.neighbours.append({"id": self.id, "distance": distance, "gradient": self.gradient, "state": self.state, "activation_index": self.activation_index, "pos": self.percieved_pos, "object": self})
     
     
     def form_gradient(self):
@@ -126,16 +157,6 @@ class Kilobot:
         
         neighbours_within_gradient_distance = [neighbour for neighbour in self.neighbours if neighbour["distance"] < GRADIENT_DISTANCE]
         stationary_neighbours = [neighbour for neighbour in neighbours_within_gradient_distance if neighbour["state"] in (KilobotState.JOINED_SHAPE, KilobotState.WAIT_TO_MOVE)]
-        # if self.state == KilobotState.JOINED_SHAPE:
-        #     joined_neighbours_within_gradient_distance = [neighbour for neighbour in neighbours_within_gradient_distance if neighbour["state"] == KilobotState.JOINED_SHAPE]
-        #     if len(joined_neighbours_within_gradient_distance) > 0:
-        #         min_gradient = min([neighbour["gradient"] for neighbour in joined_neighbours_within_gradient_distance])
-        #         self.gradient = min_gradient + 1
-        #         gradient_changed = self.gradient != self.prev_gradient
-        #         if gradient_changed:
-        #             self.going_down_gradient = self.gradient < self.prev_gradient
-        #             self.prev_gradient = self.gradient
-        #     return
         
         if len(stationary_neighbours) == 0:
             self.gradient = inf
@@ -147,7 +168,10 @@ class Kilobot:
 
 
     def localise(self):
-        if self.state == KilobotState.JOINED_SHAPE:
+        if self.is_seed:
+            return
+        
+        if self.state == KilobotState.JOINED_SHAPE and not self.use_localise:
             return
         
         localised_stationary_neighbours = [neighbour for neighbour in self.neighbours if neighbour["state"] in [KilobotState.JOINED_SHAPE]]
@@ -160,7 +184,12 @@ class Kilobot:
             v = (v[0] / c, v[1] / c)
             n = (neighbour["pos"][0] + neighbour["distance"] * v[0], neighbour["pos"][1] + neighbour["distance"] * v[1])
             self.percieved_pos = (self.percieved_pos[0] - (self.percieved_pos[0] - n[0]), self.percieved_pos[1] - (self.percieved_pos[1] - n[1]))
-                
+    
+    def perfect_localise(self):
+        if self.state == KilobotState.JOINED_SHAPE:
+            return
+        
+        self.percieved_pos = self.pos            
     
     def self_assembly(self, dt, shape):
         if self.state == KilobotState.START:
@@ -199,8 +228,12 @@ class Kilobot:
                 Kilobot.activation_index += 1
                 
             if position_inside_shape(self.percieved_pos, shape):
-                self.state = KilobotState.MOVE_WHILE_INSIDE
-                return
+                self.iterations_inside_shape += 1
+                if self.iterations_inside_shape > 10:
+                    self.state = KilobotState.MOVE_WHILE_INSIDE
+                    return
+            else:
+                self.iterations_inside_shape = 0
             
             moving_prior_neighbours = [neighbour for neighbour in self.neighbours if neighbour["state"] in [KilobotState.MOVE_WHILE_INSIDE, KilobotState.MOVE_WHILE_OUTSIDE] and neighbour["activation_index"] < self.activation_index]
             if len(moving_prior_neighbours) <= 0:
@@ -214,10 +247,14 @@ class Kilobot:
         if self.state == KilobotState.MOVE_WHILE_INSIDE:
             if not position_inside_shape(self.percieved_pos, shape):
                 self.state = KilobotState.JOINED_SHAPE
+                self.use_localise = False
+                self.joined_shape_time = 0
             closes_neighbour_distance = min([neighbour["distance"] for neighbour in self.neighbours])
             closest_neighbour = [neighbour for neighbour in self.neighbours if neighbour["distance"] == closes_neighbour_distance][0]
             if self.gradient == closest_neighbour["gradient"]: #and not self.going_down_gradient:
                 self.state = KilobotState.JOINED_SHAPE
+                self.use_localise = False
+                self.joined_shape_time = 0
                 
             moving_prior_neighbours = [neighbour for neighbour in self.neighbours if neighbour["state"] in [KilobotState.MOVE_WHILE_INSIDE, KilobotState.MOVE_WHILE_OUTSIDE] and neighbour["activation_index"] < self.activation_index]
             if len(moving_prior_neighbours) <= 0:
@@ -230,6 +267,10 @@ class Kilobot:
         
         if self.state == KilobotState.JOINED_SHAPE:
             self.updates_gradient = False
+            if self.use_localise:
+                self.joined_shape_time += dt
+                if self.joined_shape_time > LOCALISE_TIME_AFTER_JOINING:
+                    self.use_localise = False
             return
 
 
@@ -297,12 +338,12 @@ def update_neighbours(bots):
     for bot in bots:
         bot.broadcast(bots)
     
-def update_bots(bots, dt, shape):
+def update_bots(bots, dt, shape, enable_trilateration=False):
     update_neighbours(bots)
     
     for bot in bots:
         bot.form_gradient()
-        bot.localise()
+        bot.localise() if enable_trilateration else bot.perfect_localise()
         bot.self_assembly(dt, shape)
         bot.update_color()
 
@@ -311,6 +352,29 @@ def position_inside_shape(pos, shape):
     x, y = pos
     x, y = int(x), int(y)
     return (shape[x,y] == (0,0,0)).all()
+
+def generate_kilobots(shape_origin, rows, cols):
+    bots = []
+    
+    # Generate seed
+    bots.extend(generate_kilobot_seed(shape_origin))
+    
+    # Generate grid of kilobots
+    grid_origin = (shape_origin[0] - KILOBOT_RADIUS * 2.5, shape_origin[1] + KILOBOT_RADIUS * 2.5)
+    bots.extend(generate_kilobot_grid(rows, cols, grid_origin))
+    
+    return bots
+
+def generate_kilobot_seed(start_pos):
+    # 4 bots in + shape around start_pos
+    bots = []
+    bots.append(Kilobot((start_pos[0] - 1.5 * KILOBOT_RADIUS, start_pos[1]), 0, is_seed=True))
+    bots.append(Kilobot((start_pos[0] + 1.5 * KILOBOT_RADIUS, start_pos[1]), pi, is_seed=True))
+    bots.append(Kilobot((start_pos[0], start_pos[1] - 1.5 * KILOBOT_RADIUS), pi / 2, is_seed=True))
+    bots.append(Kilobot((start_pos[0], start_pos[1] + 1.5 * KILOBOT_RADIUS), -pi / 2, is_seed=True))
+    
+    return bots
+    
 
 def generate_kilobot_grid(rows, cols, start_pos):
     bots = []
