@@ -14,8 +14,8 @@ Given the image of a figure, the agents will move to fill the area of said figur
 As stated in the original paper of the algorithm and tested in this simulation, the proposed algorithm often presents a deformation in the final figure. Different tests where conducted to find the cause of this problem and fix it. More details are available in the [project's document](docs/final_project_Juan_Eizaguerri.pdf) (spanish).
 
 ![](docs/shape_image.png)
-*Pattern formation result example*
 
+*Pattern formation result example*
 ## Folder Structure
 - `/src`: Source code for the project.
 - `/docs`: Documentation and design files.
